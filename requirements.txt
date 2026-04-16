@@ -1,0 +1,12 @@
+torch==1.12.1
+recbole==1.2.0
+datasets==3.1.0
+transformers==4.22.2
+sentencepiece==0.2.0
+faiss-cpu
+scikit-learn
+numpy==1.17.2
+pandas
+tqdm
+jsonlines
+networkx

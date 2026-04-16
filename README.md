@@ -1,12 +1,32 @@
-# LISRec: Modeling User Preferences with Learned Item Shortcuts for Sequential Recommendation
+<div align="center">
 
-This repository contains the source code for the paper: [LISRec: Modeling User Preferences with Learned Item Shortcuts for Sequential Recommendation](https://github.com/NEUIR/LISRec).
+<h1>LISRec: Modeling User Preferences with Learned Item Shortcuts for Sequential Recommendation
+</h1>
 
-[![arXiv](https://img.shields.io/badge/arXiv-2505.22130-B31B1B?logo=arxiv&logoColor=white)](https://arxiv.org/pdf/2505.22130)
-[![HuggingFace – LISRec](https://img.shields.io/badge/HuggingFace-LISRec--MFilter-blue?logo=huggingface)](https://huggingface.co/xhd0728/LISRec-MFilter)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18050856.svg)](https://doi.org/10.5281/zenodo.18050856)
+<h5 align="center">
+<a href='https://arxiv.org/abs/2505.22130'><img src='https://img.shields.io/badge/Paper-LISRec-red?logo=arxiv&logoColor=white'></a>
+<a href='https://huggingface.co/xhd0728/LISRec-MFilter'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-LISRec--MFilter-blue'></a>
 
-## Overview
+Haidong Xin<sup>1</sup>,
+Zhenghao Liu<sup>1†</sup>,
+Sen Mei<sup>2</sup>,
+Yukun Yan<sup>2</sup>,
+Shi Yu<sup>2</sup>,
+Shuo Wang<sup>2</sup>,
+Zulong Chen<sup>3</sup>,
+Yu Gu<sup>1</sup>,
+Ge Yu<sup>1</sup>,
+Chenyan Xiong<sup>4</sup>
+
+<sup>1</sup>School of Computer Science and Engineering, Northeastern University, China
+<sup>2</sup>Department of Computer Science and Technology, Tsinghua University, China
+<sup>3</sup>Alibaba Group, China
+<sup>4</sup>Language Technologies Institute, Carnegie Mellon University, United States
+
+</h5>
+</div>
+
+## Introduction
 
 LISRec addresses the challenge of noisy data in sequential recommendation by constructing a user-interacted item graph. It leverages item similarities derived from their text representations to extract the maximum connected subgraph, effectively denoising the items a user has interacted with. LISRec demonstrates strong generalization capabilities by enhancing both item ID-based and text-based recommendation models.
 
@@ -18,20 +38,8 @@ LISRec addresses the challenge of noisy data in sequential recommendation by con
 
 Install the following packages using Pip or Conda under this environment.
 
-```
-python >= 3.8
-torch == 1.12.1
-recbole == 1.2.0
-datasets == 3.1.0
-transformers == 4.22.2
-sentencepiece == 0.2.0
-faiss-cpu == 1.8.0.post1
-scikit-learn >= 1.1.2
-numpy >= 1.17.2
-pandas >= 1.0.0
-tqdm
-jsonlines
-networkx
+```shell
+pip install -r requirements.txt
 ```
 
 ### 2. Install Openmatch.
