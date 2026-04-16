@@ -51,6 +51,7 @@ class DR4RecModel(nn.Module):
             data_args,
             taste_args,
         )
+        self.loss_fn = nn.CrossEntropyLoss(reduction="mean")
 
         if train_args and train_args.negatives_x_device:
             if not dist.is_initialized():
@@ -58,7 +59,6 @@ class DR4RecModel(nn.Module):
                     "Distributed training not initialized for representation all gather."
                 )
             self.process_rank, self.world_size = dist.get_rank(), dist.get_world_size()
-            self.loss_fn = nn.CrossEntropyLoss(reduction="mean")
 
     def _get_config_dict(self):
         return {
@@ -118,11 +118,11 @@ class DR4RecModel(nn.Module):
         **hf_kwargs
     ):
         model_name_or_path = model_name_or_path or model_args.model_name_or_path
-        config = None
+        openmatch_config = {}
 
         if os.path.exists(os.path.join(model_name_or_path, "openmatch_config.json")):
             with open(os.path.join(model_name_or_path, "openmatch_config.json")) as f:
-                config = json.load(f)
+                openmatch_config = json.load(f)
 
         tied = not model_args.untie_encoder
         model_class = T5EncoderModel if model_args.encoder_only else AutoModel
@@ -135,11 +135,13 @@ class DR4RecModel(nn.Module):
             lm_q=lm_q,
             lm_p=lm_p,
             tied=tied,
-            feature=config.get("plm_backbone", {}).get("feature", model_args.feature),
-            pooling=config.get("pooling", model_args.pooling),
+            feature=openmatch_config.get("plm_backbone", {}).get(
+                "feature", model_args.feature
+            ),
+            pooling=openmatch_config.get("pooling", model_args.pooling),
             head_q=None,
             head_p=None,
-            normalize=config.get("normalize", model_args.normalize),
+            normalize=openmatch_config.get("normalize", model_args.normalize),
             model_args=model_args,
             data_args=data_args,
             train_args=train_args,
@@ -148,8 +150,8 @@ class DR4RecModel(nn.Module):
 
     def save(self, output_dir: str):
         if not self.tied:
-            os.makedirs(os.path.join(output_dir, "query_model"))
-            os.makedirs(os.path.join(output_dir, "passage_model"))
+            os.makedirs(os.path.join(output_dir, "query_model"), exist_ok=True)
+            os.makedirs(os.path.join(output_dir, "passage_model"), exist_ok=True)
             self.lm_q.save_pretrained(os.path.join(output_dir, "query_model"))
             self.lm_p.save_pretrained(os.path.join(output_dir, "passage_model"))
             if self.head_q:

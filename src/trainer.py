@@ -1,14 +1,15 @@
 import random
-from typing import Dict, List, Union, Tuple, Any
+from dataclasses import dataclass
+from typing import List, Tuple
+
 import torch
+from openmatch.dataset.train_dataset import (
+    MappingTrainDatasetMixin,
+    StreamTrainDatasetMixin,
+    TrainDatasetBase,
+)
 from openmatch.trainer import DRTrainer
 from transformers import BatchEncoding, DataCollatorWithPadding
-from openmatch.dataset.train_dataset import (
-    TrainDatasetBase,
-    StreamTrainDatasetMixin,
-    MappingTrainDatasetMixin,
-)
-from dataclasses import dataclass
 
 
 @dataclass
@@ -17,53 +18,63 @@ class TasteCollator(DataCollatorWithPadding):
     max_p_len: int = 128
     len_seq: int = 2
 
+    def _pad_query_sequence(self, sequence_features):
+        collated = self.tokenizer.pad(
+            sequence_features,
+            padding="max_length",
+            max_length=self.max_q_len,
+            return_tensors="pt",
+        )
+
+        input_ids = collated["input_ids"]
+        attention_mask = collated["attention_mask"]
+        if input_ids.size(0) < self.len_seq:
+            pad_rows = self.len_seq - input_ids.size(0)
+            seq_length = input_ids.size(1)
+            pad_tensor = torch.zeros((pad_rows, seq_length), dtype=input_ids.dtype)
+            input_ids = torch.cat((input_ids, pad_tensor), dim=0)
+            attention_mask = torch.cat((attention_mask, pad_tensor), dim=0)
+
+        return input_ids.unsqueeze(0), attention_mask.unsqueeze(0)
+
     def __call__(self, features):
-        qq, dd = [f["query_"] for f in features], [f["passages"] for f in features]
+        query_features = [feature["query_"] for feature in features]
+        passage_features = [feature["passages"] for feature in features]
 
-        if isinstance(dd[0], list):
-            dd = sum(dd, [])
+        if isinstance(passage_features[0], list):
+            passage_features = [
+                passage for passages in passage_features for passage in passages
+            ]
 
-        q_collated_list = [
-            self.tokenizer.pad(
-                seq,
-                padding="max_length",
-                max_length=self.max_q_len,
-                return_tensors="pt",
-            )
-            for seq in qq
+        query_tensors = [
+            self._pad_query_sequence(sequence_features)
+            for sequence_features in query_features
         ]
-
-        seq_input_ids, seq_attention_mask = [], []
-        for q_collated in q_collated_list:
-            item_input_ids = q_collated.data["input_ids"]
-            item_attention_mask = q_collated.data["attention_mask"]
-            if item_input_ids.size(0) < self.len_seq:
-                b, l = self.len_seq - item_input_ids.size(0), item_input_ids.size(1)
-                pad = torch.zeros([b, l], dtype=item_input_ids.dtype)
-                item_input_ids = torch.cat((item_input_ids, pad), dim=0)
-                item_attention_mask = torch.cat((item_attention_mask, pad), dim=0)
-            seq_input_ids.append(item_input_ids[None])
-            seq_attention_mask.append(item_attention_mask[None])
-
-        query = (torch.cat(seq_input_ids, dim=0), torch.cat(seq_attention_mask, dim=0))
+        query = (
+            torch.cat([input_ids for input_ids, _ in query_tensors], dim=0),
+            torch.cat([attention_mask for _, attention_mask in query_tensors], dim=0),
+        )
 
         d_collated = self.tokenizer.pad(
-            dd, padding="max_length", max_length=self.max_p_len, return_tensors="pt"
+            passage_features,
+            padding="max_length",
+            max_length=self.max_p_len,
+            return_tensors="pt",
         )
-        item_input_ids = torch.unsqueeze(d_collated.data["input_ids"], 1)
-        item_attention_mask = torch.unsqueeze(d_collated.data["attention_mask"], 1)
+        item_input_ids = d_collated["input_ids"].unsqueeze(1)
+        item_attention_mask = d_collated["attention_mask"].unsqueeze(1)
 
         return query, (item_input_ids, item_attention_mask)
 
 
 class TasteTrainer(DRTrainer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     def _prepare_inputs(
-        self, inputs: Tuple[Dict[str, Union[torch.Tensor, Any]], ...]
-    ) -> List[Dict[str, Union[torch.Tensor, Any]]]:
-        return [(x[0].to(self.args.device), x[1].to(self.args.device)) for x in inputs]
+        self, inputs: Tuple[Tuple[torch.Tensor, torch.Tensor], ...]
+    ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        return [
+            (input_ids.to(self.args.device), attention_mask.to(self.args.device))
+            for input_ids, attention_mask in inputs
+        ]
 
 
 class TasteTrainDataset(TrainDatasetBase):
@@ -88,13 +99,14 @@ class TasteTrainDataset(TrainDatasetBase):
             ]
             group_positives = example["positives"]
             group_negatives = example["negatives"]
+            has_hashed_seed = hashed_seed is not None
 
-            pos_psg = (
+            positive_passage = (
                 group_positives[0]
-                if self.data_args.positive_passage_no_shuffle or hashed_seed is None
+                if self.data_args.positive_passage_no_shuffle or not has_hashed_seed
                 else group_positives[(hashed_seed + epoch) % len(group_positives)]
             )
-            encoded_passages = [self.create_one_example(pos_psg)]
+            encoded_passages = [self.create_one_example(positive_passage)]
 
             negative_size = self.data_args.train_n_passages - 1
             negs = self._get_negatives(
@@ -111,22 +123,25 @@ class TasteTrainDataset(TrainDatasetBase):
         return process_fn
 
     def _get_negatives(self, group_negatives, negative_size, epoch, hashed_seed):
+        if negative_size <= 0:
+            return []
+
+        has_hashed_seed = hashed_seed is not None
         if len(group_negatives) < negative_size:
             return (
                 random.choices(group_negatives, k=negative_size)
-                if hashed_seed
+                if has_hashed_seed
                 else (group_negatives * 2)[:negative_size]
             )
-        elif self.data_args.train_n_passages == 1:
-            return []
-        elif self.data_args.negative_passage_no_shuffle:
+        if self.data_args.negative_passage_no_shuffle:
             return group_negatives[:negative_size]
-        else:
-            _offset = epoch * negative_size % len(group_negatives)
-            negs = group_negatives.copy()
-            if hashed_seed:
-                random.Random(hashed_seed).shuffle(negs)
-            return negs * 2[_offset : _offset + negative_size]
+
+        offset = epoch * negative_size % len(group_negatives)
+        negatives = group_negatives.copy()
+        if has_hashed_seed:
+            random.Random(hashed_seed).shuffle(negatives)
+
+        return (negatives * 2)[offset : offset + negative_size]
 
 
 class StreamDRTrainDataset(StreamTrainDatasetMixin, TasteTrainDataset):

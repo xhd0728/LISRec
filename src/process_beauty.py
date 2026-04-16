@@ -1,5 +1,7 @@
-import pandas as pd
 import argparse
+import ast
+
+import pandas as pd
 
 
 def preprocess_interaction(intercation_path, output_path, prefix="books"):
@@ -39,13 +41,16 @@ def preprocess_interaction(intercation_path, output_path, prefix="books"):
 
 def preprocess_item(item_path, output_path, prefix="books"):
     data = []
-    for line in open(item_path):
-        json_data = eval(line)
-        item_id = json_data.get("asin", "")
-        description = json_data.get("description", "")
-        title = json_data.get("title", "")
+    with open(item_path, "r", encoding="utf-8") as file:
+        for line in file:
+            json_data = ast.literal_eval(line)
+            item_id = json_data.get("asin", "")
+            description = json_data.get("description", "")
+            title = json_data.get("title", "")
 
-        data.append({"item_id": item_id, "description": description, "title": title})
+            data.append(
+                {"item_id": item_id, "description": description, "title": title}
+            )
 
     df = pd.DataFrame(data)
     df.to_csv(output_path, index=False)

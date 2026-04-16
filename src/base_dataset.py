@@ -1,3 +1,4 @@
+import ast
 import os
 import pandas as pd
 
@@ -88,9 +89,9 @@ class BaseDataset(object):
                 )
 
     def parse_json(self, data_path):
-        with open(data_path, "rb") as g:
-            for l in g:
-                yield eval(l)
+        with open(data_path, "r", encoding="utf-8") as file:
+            for line in file:
+                yield ast.literal_eval(line)
 
     def getDF(self, data_path):
         i = 0

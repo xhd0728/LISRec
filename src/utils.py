@@ -1,17 +1,21 @@
+import logging
+import os
 import random
+import sys
+
 import numpy as np
 import torch
-import sys
-import logging
 
 
 logger = logging.getLogger(__name__)
 
 
 def init_logger(filename=None):
-
     handlers = [logging.StreamHandler(sys.stdout)]
     if filename is not None:
+        log_dir = os.path.dirname(filename)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
         handlers.append(logging.FileHandler(filename=filename))
     logging.basicConfig(
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -25,7 +29,6 @@ def init_logger(filename=None):
 
 
 def early_stopping(value, best, cur_step, max_step):
-
     stop_flag = False
     update_flag = False
 

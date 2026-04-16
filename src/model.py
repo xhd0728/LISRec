@@ -27,8 +27,8 @@ class TASTEModel(T5Model):
     def encode(self, input_ids, attention_mask):
         if input_ids.dim() == 3:
             self.encoder.n_passages = input_ids.size(1)
-        input_ids = input_ids.view(input_ids.size(0), -1)
-        attention_mask = attention_mask.view(attention_mask.size(0), -1)
+        input_ids = input_ids.reshape(input_ids.size(0), -1)
+        attention_mask = attention_mask.reshape(attention_mask.size(0), -1)
 
         decoder_input_ids = torch.zeros(
             (input_ids.shape[0], 1), dtype=torch.long, device=input_ids.device
@@ -62,8 +62,8 @@ class EncoderWrapper(nn.Module):
         bsz, total_length = input_ids.shape
         passage_length = total_length // self.n_passages
 
-        input_ids = input_ids.view(bsz * self.n_passages, passage_length)
-        attention_mask = attention_mask.view(bsz * self.n_passages, passage_length)
+        input_ids = input_ids.reshape(bsz * self.n_passages, passage_length)
+        attention_mask = attention_mask.reshape(bsz * self.n_passages, passage_length)
 
         outputs = self.encoder(input_ids, attention_mask, **kwargs)
 

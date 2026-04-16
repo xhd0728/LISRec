@@ -1,3 +1,4 @@
+import ast
 import bz2
 import csv
 import json
@@ -12,7 +13,6 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.base_dataset import BaseDataset
-from src.cosmetics import CosmeticsDataset
 
 
 class Music4AllOnion(BaseDataset):
@@ -1144,7 +1144,7 @@ class EPINIONSDataset(BaseDataset):
             while True:
                 if not line:
                     break
-                dict_line = eval(line)
+                dict_line = ast.literal_eval(line)
                 del dict_line["review"]
                 dict_all_data[cnt] = dict_line
                 cnt += 1

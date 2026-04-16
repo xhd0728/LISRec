@@ -7,7 +7,7 @@ class SequenceDataset(Dataset):
         self.data = data
         self.tokenizer = tokenizer
         self.args = args
-        self.template = self.toke_template()
+        self.template_tokens = self._build_template_tokens()
 
     def __len__(self):
         return len(self.data)
@@ -15,57 +15,60 @@ class SequenceDataset(Dataset):
     def __getitem__(self, index):
         return self.data[index]
 
-    def toke_template(self):
-        t_list = []
-        template1 = "Here is the visit history list of user: "
-        template2 = " recommend next item "
-        t1 = self.tokenizer.encode(
-            template1, add_special_tokens=False, truncation=False
+    def _build_template_tokens(self):
+        templates = (
+            "Here is the visit history list of user: ",
+            " recommend next item ",
         )
-        t_list.append(t1)
-        t2 = self.tokenizer.encode(
-            template2, add_special_tokens=False, truncation=False
-        )
-        t_list.append(t2)
-        return t_list
+        return [
+            self.tokenizer.encode(
+                template, add_special_tokens=False, truncation=False
+            )
+            for template in templates
+        ]
 
-    def collect_fn(self, data):
+    def collect_fn(self, batch):
         sequence_ids = []
         sequence_masks = []
         batch_target = []
-        for example in data:
-            batch_target.append(example[1])
-            seq_text = example[0]
-            seq = self.tokenizer.encode(
+
+        for seq_text, target_item in batch:
+            batch_target.append(target_item)
+            encoded_sequence = self.tokenizer.encode(
                 seq_text, add_special_tokens=False, truncation=False
             )
-            seq = list_split(seq, self.args.split_num)
-            seq[0] = self.template[0] + seq[0] + self.template[1]
-            s_ids = []
-            s_masks = []
-            for s in seq:
+            sequence_chunks = list_split(encoded_sequence, self.args.split_num)
+            sequence_chunks[0] = (
+                self.template_tokens[0]
+                + sequence_chunks[0]
+                + self.template_tokens[1]
+            )
+
+            chunk_ids = []
+            chunk_masks = []
+            for chunk in sequence_chunks:
                 outputs = self.tokenizer.encode_plus(
-                    s,
+                    chunk,
                     max_length=self.args.seq_size,
-                    pad_to_max_length=True,
+                    padding="max_length",
                     return_tensors="pt",
                     truncation=True,
                 )
-                input_ids = outputs["input_ids"]
-                attention_mask = outputs["attention_mask"]
-                s_ids.append(input_ids)
-                s_masks.append(attention_mask)
-            s_ids = torch.cat(s_ids, dim=0)
-            s_masks = torch.cat(s_masks, dim=0)
-            cur_item = s_ids.size(0)
-            if cur_item < self.args.num_passage:
-                b = self.args.num_passage - cur_item
-                l = s_ids.size(1)
-                pad = torch.zeros([b, l], dtype=s_ids.dtype)
-                s_ids = torch.cat((s_ids, pad), dim=0)
-                s_masks = torch.cat((s_masks, pad), dim=0)
-            sequence_ids.append(s_ids[None])
-            sequence_masks.append(s_masks[None])
+                chunk_ids.append(outputs["input_ids"])
+                chunk_masks.append(outputs["attention_mask"])
+
+            chunk_ids = torch.cat(chunk_ids, dim=0)
+            chunk_masks = torch.cat(chunk_masks, dim=0)
+            num_chunks = chunk_ids.size(0)
+            if num_chunks < self.args.num_passage:
+                pad_rows = self.args.num_passage - num_chunks
+                seq_length = chunk_ids.size(1)
+                padding = torch.zeros((pad_rows, seq_length), dtype=chunk_ids.dtype)
+                chunk_ids = torch.cat((chunk_ids, padding), dim=0)
+                chunk_masks = torch.cat((chunk_masks, padding), dim=0)
+
+            sequence_ids.append(chunk_ids.unsqueeze(0))
+            sequence_masks.append(chunk_masks.unsqueeze(0))
 
         sequence_ids = torch.cat(sequence_ids, dim=0)
         sequence_masks = torch.cat(sequence_masks, dim=0)
@@ -90,7 +93,6 @@ class ItemDataset(Dataset):
         return self.data[index]
 
     def collect_fn(self, batch):
-
         item_ids, item_masks = encode_batch(batch, self.tokenizer, self.args.item_size)
 
         return {
@@ -100,111 +102,92 @@ class ItemDataset(Dataset):
 
 
 def list_split(array, n):
-    split_list = []
-    s1 = array[:n]
-    s2 = array[n:]
-    split_list.append(s1)
-    if len(s2) != 0:
-        split_list.append(s2)
-    return split_list
+    first_chunk = array[:n]
+    second_chunk = array[n:]
+    return [first_chunk] + ([second_chunk] if second_chunk else [])
 
 
 def encode_batch(batch_text, tokenizer, max_length):
     outputs = tokenizer.batch_encode_plus(
         batch_text,
         max_length=max_length,
-        pad_to_max_length=True,
+        padding="max_length",
         return_tensors="pt",
         truncation=True,
     )
-    input_ids = outputs["input_ids"]
-    input_ids = torch.unsqueeze(input_ids, 1)
-    attention_mask = outputs["attention_mask"]
-    attention_mask = torch.unsqueeze(attention_mask, 1)
+    input_ids = outputs["input_ids"].unsqueeze(1)
+    attention_mask = outputs["attention_mask"].unsqueeze(1)
 
     return input_ids, attention_mask
 
 
 def load_item_name(filename):
-    item_desc = dict()
+    item_desc = {}
     title_prefix = "title:"
-    lines = open(filename, "r").readlines()
-    for i, line in enumerate(lines[1:], start=2):
-        try:
-            line = line.strip().split("\t")
-            if len(line) < 2:
-                raise ValueError(f"Line {i} does not have enough elements: {line}")
-            item_id = int(line[0])
-            name = line[1]
-            name = name.replace("&amp;", "")
-            item_text = title_prefix + " " + name
-            item_desc[item_id] = item_text
-        except Exception as e:
-            print(f"Error processing line {i}: {line}")
-            print(f"Exception: {e}")
-            continue
+
+    with open(filename, "r", encoding="utf-8") as file:
+        next(file, None)
+        for line_number, raw_line in enumerate(file, start=2):
+            try:
+                fields = raw_line.strip().split("\t")
+                if len(fields) < 2:
+                    raise ValueError(
+                        f"Line {line_number} does not have enough elements: {fields}"
+                    )
+
+                item_id = int(fields[0])
+                item_name = fields[1].replace("&amp;", "")
+                item_desc[item_id] = f"{title_prefix} {item_name}"
+            except Exception as exc:
+                print(f"Error processing line {line_number}: {raw_line.strip()}")
+                print(f"Exception: {exc}")
+
     return item_desc
 
 
 def load_item_address(filename):
-    # load name and address
-    item_desc = dict()
-    id_prefix = "id:"
+    item_desc = {}
     title_prefix = "title:"
     passage_prefix = "address:"
-    lines = open(filename, "r").readlines()
-    for line in lines[1:]:
-        line = line.strip().split("\t")
-        item_id = int(line[0])
-        name = line[1]
-        address = line[3]
-        city = line[4]
-        state = line[5]
-        item_text = (
-            title_prefix
-            + " "
-            + name
-            + " "
-            + passage_prefix
-            + " "
-            + address
-            + " "
-            + city
-            + " "
-            + state
-        )
-        item_desc[item_id] = item_text
+
+    with open(filename, "r", encoding="utf-8") as file:
+        next(file, None)
+        for raw_line in file:
+            fields = raw_line.strip().split("\t")
+            item_id = int(fields[0])
+            name = fields[1]
+            address = fields[3]
+            city = fields[4]
+            state = fields[5]
+            item_desc[item_id] = (
+                f"{title_prefix} {name} {passage_prefix} {address} {city} {state}"
+            )
+
     return item_desc
 
 
 def load_data(filename, item_desc):
     data = []
-    lines = open(filename, "r").readlines()
-    for line in lines[1:]:
-        example = list()
-        line = line.strip().split("\t")
-        target = int(line[-1])
-        seq_id = line[1:-1]
-        text_list = []
-        for id in seq_id:
-            id = int(id)
-            if id == 0:
-                break
-            text_list.append(item_desc[id])
-        text_list.reverse()
-        seq_text = ", ".join(text_list)
-        example.append(seq_text)
-        example.append(target)
-        data.append(example)
+
+    with open(filename, "r", encoding="utf-8") as file:
+        next(file, None)
+        for raw_line in file:
+            fields = raw_line.strip().split("\t")
+            target_item = int(fields[-1])
+            sequence_ids = fields[1:-1]
+
+            text_list = []
+            for item_id in sequence_ids:
+                item_id = int(item_id)
+                if item_id == 0:
+                    break
+                text_list.append(item_desc[item_id])
+
+            text_list.reverse()
+            data.append([", ".join(text_list), target_item])
 
     return data
 
 
 def load_item_data(item_desc):
-    data = []
-    keys = item_desc.keys()
-    for i in keys:
-        text = item_desc[i]
-        data.append(text)
-
-    return data
+    return list(item_desc.values())

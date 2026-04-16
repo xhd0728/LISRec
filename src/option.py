@@ -1,7 +1,26 @@
 import argparse
+import ast
 import logging
+from typing import List
 
 logger = logging.getLogger(__name__)
+
+
+def parse_ks_arg(value: str) -> List[int]:
+    try:
+        ks = ast.literal_eval(value) if isinstance(value, str) else value
+    except (SyntaxError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(
+            "--Ks must be a Python-style list such as '[5, 10, 20]'"
+        ) from exc
+
+    if not isinstance(ks, (list, tuple)) or not ks:
+        raise argparse.ArgumentTypeError("--Ks must be a non-empty list of integers")
+
+    if any(not isinstance(k, int) or k <= 0 for k in ks):
+        raise argparse.ArgumentTypeError("--Ks must contain positive integers only")
+
+    return list(ks)
 
 
 class Options:
@@ -12,9 +31,11 @@ class Options:
         self.initialize_parser()
 
     def initialize_parser(self):
-
         self.parser.add_argument(
             "--checkpoint_dir", type=str, default="runlog/", help="logs are saved here"
+        )
+        self.parser.add_argument(
+            "--logging_dir", type=str, default="runlog/", help="logging output path."
         )
         self.parser.add_argument("--best_model_path", type=str, help="load best model.")
         self.parser.add_argument(
@@ -60,8 +81,8 @@ class Options:
         )
         self.parser.add_argument(
             "--Ks",
-            nargs="?",
-            default="[5, 10, 15, 20]",
+            type=parse_ks_arg,
+            default=[5, 10, 15, 20],
             help="Calculate metric@K when evaluating.",
         )
         self.parser.add_argument(
